@@ -23,8 +23,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,11 +49,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipFile
 
-// 定义阅读模式枚举
+// 移除左右翻页，只保留无缝和带黑边连页
 enum class ReadMode {
-    VERTICAL_SEAMLESS, // 垂直无缝
-    VERTICAL_GAP,      // 垂直有黑边
-    HORIZONTAL         // 水平翻页
+    VERTICAL_SEAMLESS,
+    VERTICAL_GAP
 }
 
 class MainActivity : ComponentActivity() {
@@ -174,21 +171,29 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
     val imageEntries = remember(file.path) { getAllImagesFromZip(file) }
     val context = LocalContext.current
     
-    // 默认无缝垂直模式
     var readMode by remember { mutableStateOf(ReadMode.VERTICAL_SEAMLESS) }
+    // 新增：是否全屏沉浸模式，默认全屏（隐藏状态栏）
+    var isFullScreen by remember { mutableStateOf(true) }
 
-    DisposableEffect(Unit) {
+    // 动态响应全屏状态：切换时显示/隐藏系统状态栏
+    DisposableEffect(isFullScreen) {
         val window = (context as ComponentActivity).window
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        controller.hide(WindowInsetsCompat.Type.systemBars())
-        onDispose { controller.show(WindowInsetsCompat.Type.systemBars()) }
+        if (isFullScreen) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose {}
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            // 如果非全屏，给顶部加上安全区 padding（这就能产生你要的顶部黑色留白）
+            .then(if (!isFullScreen) Modifier.statusBarsPadding() else Modifier)
             .pointerInput(Unit) { detectTapGestures(onTap = { isUiVisible = !isUiVisible }) }
     ) {
         when (readMode) {
@@ -200,38 +205,24 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
                 }
             }
             ReadMode.VERTICAL_GAP -> {
-                // 【新增】：上下滚动，但加入 8dp 的黑边缝隙
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     itemsIndexed(imageEntries) { _, entryName ->
-                        Box(modifier = Modifier.padding(vertical = 8.dp)) { // 这里产生黑边
+                        Box(modifier = Modifier.padding(vertical = 8.dp)) {
                             TiledImageItem(file = file, entryName = entryName)
                         }
                     }
                 }
             }
-            ReadMode.HORIZONTAL -> {
-                val pagerState = rememberPagerState(pageCount = { imageEntries.size })
-                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
-                    val bytes = remember(imageEntries[page]) { getImageStreamFromZip(file, imageEntries[page]) }
-                    if (bytes != null) {
-                        AsyncImage(
-                            model = bytes,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit 
-                        )
-                    }
-                }
-            }
         }
 
-        // 悬浮菜单
         if (isUiVisible) {
             Column(
                 modifier = Modifier
-                    .padding(top = 40.dp, start = 16.dp)
+                    // 如果不是全屏，因为已经有 statusBarsPadding 了，所以这里不用加太大的 top padding
+                    .padding(top = if (isFullScreen) 40.dp else 16.dp, start = 16.dp)
                     .align(Alignment.TopStart)
             ) {
+                // 返回按钮
                 Box(
                     modifier = Modifier
                         .border(1.dp, Color.White)
@@ -244,28 +235,36 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
                 
                 Spacer(modifier = Modifier.height(12.dp))
                 
-                // 切换模式按钮
+                // 切换阅读模式（无缝 / 连页）
                 Box(
                     modifier = Modifier
                         .border(1.dp, Color.White)
                         .background(Color.Black.copy(alpha = 0.8f))
-                        .clickable { 
-                            // 循环切换三种模式
-                            readMode = when(readMode) {
-                                ReadMode.VERTICAL_SEAMLESS -> ReadMode.VERTICAL_GAP
-                                ReadMode.VERTICAL_GAP -> ReadMode.HORIZONTAL
-                                ReadMode.HORIZONTAL -> ReadMode.VERTICAL_SEAMLESS
-                            }
+                        .clickable {
+                            readMode = if (readMode == ReadMode.VERTICAL_SEAMLESS) ReadMode.VERTICAL_GAP else ReadMode.VERTICAL_SEAMLESS
                         }
                         .padding(8.dp)
                 ) {
                     Text(
-                        text = when(readMode) {
-                            ReadMode.VERTICAL_SEAMLESS -> "模式: 无缝"
-                            ReadMode.VERTICAL_GAP -> "模式: 连页"
-                            ReadMode.HORIZONTAL -> "模式: 翻页"
-                        }, 
-                        color = Color.White, 
+                        text = if (readMode == ReadMode.VERTICAL_SEAMLESS) "模式: 无缝" else "模式: 连页",
+                        color = Color.White,
+                        fontFamily = FontFamily.Serif
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 切换全屏状态（全屏 / 显示状态栏）
+                Box(
+                    modifier = Modifier
+                        .border(1.dp, Color.White)
+                        .background(Color.Black.copy(alpha = 0.8f))
+                        .clickable { isFullScreen = !isFullScreen }
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = if (isFullScreen) "全屏: 沉浸" else "全屏: 状态栏",
+                        color = Color.White,
                         fontFamily = FontFamily.Serif
                     )
                 }
@@ -277,7 +276,7 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
 @Composable
 fun TiledImageItem(file: File, entryName: String) {
     var tiles by remember { mutableStateOf<List<androidx.compose.ui.graphics.ImageBitmap>>(emptyList()) }
-    
+
     LaunchedEffect(entryName) {
         withContext(Dispatchers.IO) {
             val bytes = getImageStreamFromZip(file, entryName)
@@ -310,16 +309,13 @@ fun splitLargeImage(bytes: ByteArray): List<androidx.compose.ui.graphics.ImageBi
     val result = mutableListOf<androidx.compose.ui.graphics.ImageBitmap>()
     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-    
     val width = options.outWidth
     val height = options.outHeight
-    
     if (height <= 4096) {
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         if (bmp != null) result.add(bmp.asImageBitmap())
         return result
     }
-
     try {
         val decoder = BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
         val tileHeight = 2048
@@ -328,9 +324,7 @@ fun splitLargeImage(bytes: ByteArray): List<androidx.compose.ui.graphics.ImageBi
             val h = minOf(tileHeight, height - y)
             val rect = Rect(0, y, width, y + h)
             val bitmap = decoder?.decodeRegion(rect, null)
-            if (bitmap != null) {
-                result.add(bitmap.asImageBitmap())
-            }
+            if (bitmap != null) result.add(bitmap.asImageBitmap())
             y += tileHeight
         }
         decoder?.recycle()
@@ -338,7 +332,6 @@ fun splitLargeImage(bytes: ByteArray): List<androidx.compose.ui.graphics.ImageBi
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         if (bmp != null) result.add(bmp.asImageBitmap())
     }
-    
     return result
 }
 
