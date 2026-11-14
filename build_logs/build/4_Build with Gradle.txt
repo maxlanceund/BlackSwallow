@@ -1,0 +1,40 @@
+﻿2026-11-14T11:13:06.1619645Z ##[group]Run gradle wrapper --gradle-version 8.2 && ./gradlew assembleDebug
+2026-11-14T11:13:06.1622369Z [36;1mgradle wrapper --gradle-version 8.2 && ./gradlew assembleDebug[0m
+2026-11-14T11:13:06.1648345Z shell: /usr/bin/bash -e {0}
+2026-11-14T11:13:06.1649442Z env:
+2026-11-14T11:13:06.1650459Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-14T11:13:06.1652098Z   JAVA_HOME_17_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64
+2026-11-14T11:13:06.1653519Z ##[endgroup]
+2026-11-14T11:13:16.1027418Z 
+2026-11-14T11:13:16.1028355Z Welcome to Gradle 9.9.1!
+2026-11-14T11:13:16.1028630Z 
+2026-11-14T11:13:16.1029059Z Here are the highlights of this release:
+2026-11-14T11:13:16.1046720Z  - Performance improvements for Kotlin DSL compilation
+2026-11-14T11:13:16.1047512Z  - Test filtering for non-method JUnit Platform tests
+2026-11-14T11:13:16.1052159Z  - Wrapper settings preserved on upgrade
+2026-11-14T11:13:16.1052703Z  - Predefined groups in the Problems API
+2026-11-14T11:13:16.1053057Z 
+2026-11-14T11:13:16.1053293Z For more details see https://docs.gradle.org/9.9.1/release-notes.html
+2026-11-14T11:13:16.1053547Z 
+2026-11-14T11:13:17.0014809Z Starting a Gradle Daemon (subsequent builds will be faster)
+2026-11-14T11:13:30.5020602Z 
+2026-11-14T11:13:30.5063905Z FAILURE: Build failed with an exception.
+2026-11-14T11:13:30.5089585Z 
+2026-11-14T11:13:30.5099873Z * What went wrong:
+2026-11-14T11:13:30.5100612Z A problem occurred configuring root project 'BlackSwallow'.
+2026-11-14T11:13:30.5101339Z > Could not resolve all artifacts for configuration 'classpath'.
+2026-11-14T11:13:30.5102311Z    > Cannot resolve external dependency com.android.tools.build:gradle:8.1.1 because no repositories are defined.
+2026-11-14T11:13:30.5103137Z      Required by:
+2026-11-14T11:13:30.5103547Z          buildscript of root project 'BlackSwallow'
+2026-11-14T11:13:30.5104459Z    > Cannot resolve external dependency org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0 because no repositories are defined.
+2026-11-14T11:13:30.5105360Z      Required by:
+2026-11-14T11:13:30.5105809Z          buildscript of root project 'BlackSwallow'
+2026-11-14T11:13:30.5106192Z 
+2026-11-14T11:13:30.5106416Z * Try:
+2026-11-14T11:13:30.5106840Z > Run with --stacktrace option to get the stack trace.
+2026-11-14T11:13:30.5107477Z > Run with --info or --debug option to get more log output.
+2026-11-14T11:13:30.5108596Z > Run with --scan to get full insights from a Build Scan (powered by Develocity).
+2026-11-14T11:13:30.5109695Z > Get more help at https://help.gradle.org.
+2026-11-14T11:13:30.5110127Z 
+2026-11-14T11:13:30.5110369Z BUILD FAILED in 22s
+2026-11-14T11:13:30.8722927Z ##[error]Process completed with exit code 1.
