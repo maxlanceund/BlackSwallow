@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -23,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -34,6 +36,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.size.Precision
+import coil.size.Scale
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -122,7 +126,12 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
                         val coverData = remember(file.path) { getFirstImageFromZip(file) }
                         if (coverData != null) {
                             AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current).data(coverData).crossfade(true).build(),
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(coverData)
+                                    .crossfade(true)
+                                    // 限制封面加载尺寸，防止内存撑爆
+                                    .size(300) 
+                                    .build(),
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
@@ -139,45 +148,91 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
 
 @Composable
 fun ReaderScreen(file: File, onBack: () -> Unit) {
-    // 进页面直接获取排序好并读取完的图片字节流列表
-    val imageList = remember(file.path) { getSortedImagesFromZip(file) }
+    // 记录 UI 是否显示（点击屏幕可以隐藏/显示返回按钮）
+    var isUiVisible by remember { mutableStateOf(true) }
+    val imageEntries = remember(file.path) { getAllImagesFromZip(file) }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        if (imageList.isEmpty()) {
-             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                 Text("无法读取该压缩包内的图片", color = Color.White, fontFamily = FontFamily.Serif)
-             }
-        } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(imageList) { _, bytes ->
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(bytes) // 直接加载已经读好的 ByteArray，滑动绝对不卡
-                            .build(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth(),
-                        contentScale = ContentScale.FillWidth
-                    )
-                }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            // 点击屏幕任意位置，切换 UI 的显示和隐藏
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { isUiVisible = !isUiVisible })
+            }
+    ) {
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            itemsIndexed(imageEntries) { _, entryName ->
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(getImageStreamFromZip(file, entryName))
+                        // 【核心优化】：开启降采样，按屏幕宽度缩放。长图再怎么大，GPU 也扛得住！
+                        .size(coil.size.Size.ORIGINAL) 
+                        .precision(Precision.INEXACT)
+                        .scale(Scale.FILL)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.FillWidth
+                )
             }
         }
-        
-        // 极简悬浮返回按钮
-        Box(
-            modifier = Modifier
-                .padding(16.dp)
-                .border(1.dp, Color.White)
-                .background(Color.Black.copy(alpha = 0.7f))
-                .clickable { onBack() }
-                .padding(8.dp)
-                .align(Alignment.TopStart)
-        ) {
-            Text("< 返回", color = Color.White, fontFamily = FontFamily.Serif)
+
+        // 只有 isUiVisible 为 true 时，返回按钮才显示
+        if (isUiVisible) {
+            Box(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .border(1.dp, Color.White)
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .clickable { onBack() }
+                    .padding(8.dp)
+                    .align(Alignment.TopStart)
+            ) {
+                Text("< 返回", color = Color.White, fontFamily = FontFamily.Serif)
+            }
         }
     }
 }
 
-// 【修复】：自然排序算法（让 page2 排在 page10 前面）
+fun getFirstImageFromZip(file: File): ByteArray? {
+    try {
+        ZipFile(file).use { zip ->
+            val firstEntry = zip.entries().asSequence()
+                .filter { !it.isDirectory && (it.name.endsWith(".jpg", true) || it.name.endsWith(".png", true) || it.name.endsWith(".webp", true)) }
+                .sortedWith { a, b -> naturalCompare(a.name, b.name) }
+                .firstOrNull()
+            if (firstEntry != null) return zip.getInputStream(firstEntry).readBytes()
+        }
+    } catch (e: Exception) { }
+    return null
+}
+
+// 只获取文件名列表，不再把整个图片的 ByteArray 塞进内存！
+fun getAllImagesFromZip(file: File): List<String> {
+    try {
+        ZipFile(file).use { zip ->
+            return zip.entries().asSequence()
+                .filter { !it.isDirectory && (it.name.endsWith(".jpg", true) || it.name.endsWith(".png", true) || it.name.endsWith(".webp", true)) }
+                .map { it.name }
+                .sortedWith { a, b -> naturalCompare(a, b) }
+                .toList()
+        }
+    } catch (e: Exception) { }
+    return emptyList()
+}
+
+// 按需实时从 ZIP 读取流
+fun getImageStreamFromZip(file: File, entryName: String): ByteArray? {
+    try {
+        ZipFile(file).use { zip ->
+            val entry = zip.getEntry(entryName)
+            if (entry != null) return zip.getInputStream(entry).readBytes()
+        }
+    } catch (e: Exception) { }
+    return null
+}
+
 fun naturalCompare(a: String, b: String): Int {
     val regex = Regex("(\\d+)|(\\D+)")
     val partsA = regex.findAll(a).map { it.value }.toList()
@@ -195,37 +250,4 @@ fun naturalCompare(a: String, b: String): Int {
         }
     }
     return partsA.size.compareTo(partsB.size)
-}
-
-fun getFirstImageFromZip(file: File): ByteArray? {
-    try {
-        ZipFile(file).use { zip ->
-            val firstEntry = zip.entries().asSequence()
-                .filter { !it.isDirectory && (it.name.endsWith(".jpg", true) || it.name.endsWith(".png", true) || it.name.endsWith(".webp", true)) }
-                .sortedWith { a, b -> naturalCompare(a.name, b.name) } // 用自然排序取第一张
-                .firstOrNull()
-            if (firstEntry != null) return zip.getInputStream(firstEntry).readBytes()
-        }
-    } catch (e: Exception) { }
-    return null
-}
-
-// 【修复】：一次性按自然排序读取所有图片，大幅提高滑动性能
-fun getSortedImagesFromZip(file: File): List<ByteArray> {
-    val byteList = mutableListOf<ByteArray>()
-    try {
-        ZipFile(file).use { zip ->
-            val entries = zip.entries().asSequence()
-                .filter { !it.isDirectory && (it.name.endsWith(".jpg", true) || it.name.endsWith(".png", true) || it.name.endsWith(".webp", true)) }
-                .sortedWith { a, b -> naturalCompare(a.name, b.name) }
-                .toList()
-            
-            for (entry in entries) {
-                zip.getInputStream(entry).use { input ->
-                    byteList.add(input.readBytes())
-                }
-            }
-        }
-    } catch (e: Exception) { }
-    return byteList
 }
