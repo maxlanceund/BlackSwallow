@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,12 +46,17 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import coil.size.Precision
-import coil.size.Scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipFile
+
+// 定义阅读模式枚举
+enum class ReadMode {
+    VERTICAL_SEAMLESS, // 垂直无缝
+    VERTICAL_GAP,      // 垂直有黑边
+    HORIZONTAL         // 水平翻页
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,7 +131,12 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
     } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
-            modifier = Modifier.fillMaxSize().background(Color.Black).padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
@@ -156,12 +168,14 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
     }
 }
 
-// 【核心改造】：直接使用 Bitmap 渲染
 @Composable
 fun ReaderScreen(file: File, onBack: () -> Unit) {
     var isUiVisible by remember { mutableStateOf(true) }
     val imageEntries = remember(file.path) { getAllImagesFromZip(file) }
     val context = LocalContext.current
+    
+    // 默认无缝垂直模式
+    var readMode by remember { mutableStateOf(ReadMode.VERTICAL_SEAMLESS) }
 
     DisposableEffect(Unit) {
         val window = (context as ComponentActivity).window
@@ -177,24 +191,84 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
             .background(Color.Black)
             .pointerInput(Unit) { detectTapGestures(onTap = { isUiVisible = !isUiVisible }) }
     ) {
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            itemsIndexed(imageEntries) { _, entryName ->
-                // 每一页长图，我们都用一个专用的切片组件来渲染
-                TiledImageItem(file = file, entryName = entryName)
+        when (readMode) {
+            ReadMode.VERTICAL_SEAMLESS -> {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    itemsIndexed(imageEntries) { _, entryName ->
+                        TiledImageItem(file = file, entryName = entryName)
+                    }
+                }
+            }
+            ReadMode.VERTICAL_GAP -> {
+                // 【新增】：上下滚动，但加入 8dp 的黑边缝隙
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    itemsIndexed(imageEntries) { _, entryName ->
+                        Box(modifier = Modifier.padding(vertical = 8.dp)) { // 这里产生黑边
+                            TiledImageItem(file = file, entryName = entryName)
+                        }
+                    }
+                }
+            }
+            ReadMode.HORIZONTAL -> {
+                val pagerState = rememberPagerState(pageCount = { imageEntries.size })
+                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                    val bytes = remember(imageEntries[page]) { getImageStreamFromZip(file, imageEntries[page]) }
+                    if (bytes != null) {
+                        AsyncImage(
+                            model = bytes,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit 
+                        )
+                    }
+                }
             }
         }
 
+        // 悬浮菜单
         if (isUiVisible) {
-            Box(
+            Column(
                 modifier = Modifier
                     .padding(top = 40.dp, start = 16.dp)
-                    .border(1.dp, Color.White)
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    .clickable { onBack() }
-                    .padding(8.dp)
                     .align(Alignment.TopStart)
             ) {
-                Text("< 返回", color = Color.White, fontFamily = FontFamily.Serif)
+                Box(
+                    modifier = Modifier
+                        .border(1.dp, Color.White)
+                        .background(Color.Black.copy(alpha = 0.8f))
+                        .clickable { onBack() }
+                        .padding(8.dp)
+                ) {
+                    Text("< 返回", color = Color.White, fontFamily = FontFamily.Serif)
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // 切换模式按钮
+                Box(
+                    modifier = Modifier
+                        .border(1.dp, Color.White)
+                        .background(Color.Black.copy(alpha = 0.8f))
+                        .clickable { 
+                            // 循环切换三种模式
+                            readMode = when(readMode) {
+                                ReadMode.VERTICAL_SEAMLESS -> ReadMode.VERTICAL_GAP
+                                ReadMode.VERTICAL_GAP -> ReadMode.HORIZONTAL
+                                ReadMode.HORIZONTAL -> ReadMode.VERTICAL_SEAMLESS
+                            }
+                        }
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = when(readMode) {
+                            ReadMode.VERTICAL_SEAMLESS -> "模式: 无缝"
+                            ReadMode.VERTICAL_GAP -> "模式: 连页"
+                            ReadMode.HORIZONTAL -> "模式: 翻页"
+                        }, 
+                        color = Color.White, 
+                        fontFamily = FontFamily.Serif
+                    )
+                }
             }
         }
     }
@@ -202,15 +276,12 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
 
 @Composable
 fun TiledImageItem(file: File, entryName: String) {
-    // 存放切片后的位图列表
     var tiles by remember { mutableStateOf<List<androidx.compose.ui.graphics.ImageBitmap>>(emptyList()) }
     
-    // 在后台线程进行 Tachiyomi 级的切片处理
     LaunchedEffect(entryName) {
         withContext(Dispatchers.IO) {
             val bytes = getImageStreamFromZip(file, entryName)
             if (bytes != null) {
-                // 核心切片术：把高度切分成一块一块的
                 val decodedTiles = splitLargeImage(bytes)
                 withContext(Dispatchers.Main) {
                     tiles = decodedTiles
@@ -220,10 +291,8 @@ fun TiledImageItem(file: File, entryName: String) {
     }
 
     if (tiles.isEmpty()) {
-        // 没加载出来之前，展示一个同屏幕宽度的纯黑占位框
         Box(modifier = Modifier.fillMaxWidth().height(1000.dp).background(Color.Black))
     } else {
-        // 把切片好的小块图片，垂直拼在一起（无缝贴合）
         Column(modifier = Modifier.fillMaxWidth()) {
             tiles.forEach { imageBitmap ->
                 Image(
@@ -237,7 +306,6 @@ fun TiledImageItem(file: File, entryName: String) {
     }
 }
 
-// 【Tachiyomi 核心切片术】：防止 OOM 和 GPU 爆显存
 fun splitLargeImage(bytes: ByteArray): List<androidx.compose.ui.graphics.ImageBitmap> {
     val result = mutableListOf<androidx.compose.ui.graphics.ImageBitmap>()
     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -246,17 +314,15 @@ fun splitLargeImage(bytes: ByteArray): List<androidx.compose.ui.graphics.ImageBi
     val width = options.outWidth
     val height = options.outHeight
     
-    // 如果图片不算太长，直接加载，不用切
     if (height <= 4096) {
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         if (bmp != null) result.add(bmp.asImageBitmap())
         return result
     }
 
-    // 如果超长，使用 BitmapRegionDecoder 进行切片
     try {
         val decoder = BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
-        val tileHeight = 2048 // 每块切 2048 像素高，GPU 最爱
+        val tileHeight = 2048
         var y = 0
         while (y < height) {
             val h = minOf(tileHeight, height - y)
@@ -269,7 +335,6 @@ fun splitLargeImage(bytes: ByteArray): List<androidx.compose.ui.graphics.ImageBi
         }
         decoder?.recycle()
     } catch (e: Exception) {
-        // 如果解码失败（比如图片格式不支持），降级为整体加载
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         if (bmp != null) result.add(bmp.asImageBitmap())
     }
