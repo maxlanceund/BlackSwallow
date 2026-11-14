@@ -157,7 +157,8 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(categories.size) { index ->
+                // 【修复】：显式使用 count 参数，避免歧义
+                items(count = categories.size) { index ->
                     val cat = categories[index]
                     val isSelected = cat == selectedCategory
                     Box(
@@ -194,7 +195,9 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                items(filteredComics) { item ->
+                // 【修复】：显式使用 count 参数，彻底消灭编译错误
+                items(count = filteredComics.size) { index ->
+                    val item = filteredComics[index]
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.clickable { onComicClick(item.file) }
@@ -229,10 +232,8 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
     val imageEntries = remember(file.path) { getAllImagesFromZip(file) }
     val context = LocalContext.current
     
-    // 【核心新增】：引入 SharedPreferences 记忆本
     val prefs = remember { context.getSharedPreferences("BlackSwallowPrefs", Context.MODE_PRIVATE) }
     
-    // 从记忆本读取上次的选择
     var readMode by remember { 
         mutableStateOf(
             if (prefs.getString("read_mode", "SEAMLESS") == "GAP") ReadMode.VERTICAL_GAP else ReadMode.VERTICAL_SEAMLESS
@@ -294,7 +295,6 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
                 
                 Box(
                     modifier = Modifier.border(1.dp, Color.White).background(Color.Black.copy(alpha = 0.8f)).clickable {
-                        // 点击时切换模式，并写入记忆本
                         val newMode = if (readMode == ReadMode.VERTICAL_SEAMLESS) ReadMode.VERTICAL_GAP else ReadMode.VERTICAL_SEAMLESS
                         readMode = newMode
                         prefs.edit().putString("read_mode", if (newMode == ReadMode.VERTICAL_GAP) "GAP" else "SEAMLESS").apply()
@@ -307,7 +307,6 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
 
                 Box(
                     modifier = Modifier.border(1.dp, Color.White).background(Color.Black.copy(alpha = 0.8f)).clickable {
-                        // 点击时切换全屏，并写入记忆本
                         isFullScreen = !isFullScreen
                         prefs.edit().putBoolean("full_screen", isFullScreen).apply()
                     }.padding(8.dp)
