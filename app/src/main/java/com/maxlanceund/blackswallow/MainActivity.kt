@@ -1,6 +1,7 @@
 package com.maxlanceund.blackswallow
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
@@ -19,9 +20,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -49,11 +50,12 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipFile
 
-// 移除左右翻页，只保留无缝和带黑边连页
 enum class ReadMode {
     VERTICAL_SEAMLESS,
     VERTICAL_GAP
 }
+
+data class ComicItem(val file: File, val category: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -113,52 +115,108 @@ fun BlackSwallowApp() {
 @Composable
 fun BookshelfScreen(onComicClick: (File) -> Unit) {
     val comicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "BlackSwallow")
-    val comicFiles = remember {
+    
+    val allComics = remember {
+        val list = mutableListOf<ComicItem>()
         if (comicDir.exists() && comicDir.isDirectory) {
-            comicDir.walkTopDown()
-                .filter { it.isFile && (it.extension.lowercase() == "zip" || it.extension.lowercase() == "cbz") }
-                .toList()
-        } else emptyList()
+            comicDir.walkTopDown().forEach { file ->
+                if (file.isFile && (file.extension.lowercase() == "zip" || file.extension.lowercase() == "cbz")) {
+                    val relativePath = file.absolutePath.substring(comicDir.absolutePath.length).trimStart(File.separatorChar)
+                    val category = if (relativePath.contains(File.separator)) {
+                        relativePath.substringBefore(File.separator)
+                    } else {
+                        "未分类"
+                    }
+                    list.add(ComicItem(file, category))
+                }
+            }
+        }
+        list
     }
 
-    if (comicFiles.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            Text("书架空空如也\n请把 ZIP/CBZ 放到\nDownload/BlackSwallow 文件夹", color = Color.White, fontFamily = FontFamily.Serif, textAlign = TextAlign.Center, lineHeight = 30.sp)
+    val categories = remember(allComics) {
+        mutableListOf("全部").apply {
+            addAll(allComics.map { it.category }.distinct().sorted().filter { it != "全部" })
         }
-    } else {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            items(comicFiles) { file ->
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.clickable { onComicClick(file) }
-                ) {
-                    Box(modifier = Modifier.aspectRatio(0.7f).border(1.dp, Color.White).background(Color.Black)) {
-                        val coverData = remember(file.path) { getFirstImageFromZip(file) }
-                        if (coverData != null) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(coverData)
-                                    .crossfade(true)
-                                    .size(300)
-                                    .build(),
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
+    }
+
+    var selectedCategory by remember { mutableStateOf("全部") }
+    val filteredComics = if (selectedCategory == "全部") allComics else allComics.filter { it.category == selectedCategory }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        if (allComics.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(categories.size) { index ->
+                    val cat = categories[index]
+                    val isSelected = cat == selectedCategory
+                    Box(
+                        modifier = Modifier
+                            .border(1.dp, if (isSelected) Color.White else Color.Transparent)
+                            .clickable { selectedCategory = cat }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = cat,
+                            color = if (isSelected) Color.White else Color.Gray,
+                            fontFamily = FontFamily.Serif,
+                            fontSize = 14.sp
+                        )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(file.nameWithoutExtension, color = Color.White, fontFamily = FontFamily.Serif, fontSize = 12.sp, maxLines = 1, textAlign = TextAlign.Center)
+                }
+            }
+        }
+
+        if (allComics.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("书架空空如也\n请把 ZIP/CBZ 放到\nDownload/BlackSwallow 文件夹", color = Color.White, fontFamily = FontFamily.Serif, textAlign = TextAlign.Center, lineHeight = 30.sp)
+            }
+        } else if (filteredComics.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("该分类下暂无漫画", color = Color.Gray, fontFamily = FontFamily.Serif)
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                items(filteredComics) { item ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable { onComicClick(item.file) }
+                    ) {
+                        Box(modifier = Modifier.aspectRatio(0.7f).border(1.dp, Color.White).background(Color.Black)) {
+                            val coverData = remember(item.file.path) { getFirstImageFromZip(item.file) }
+                            if (coverData != null) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(coverData)
+                                        .crossfade(true)
+                                        .size(300)
+                                        .build(),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(item.file.nameWithoutExtension, color = Color.White, fontFamily = FontFamily.Serif, fontSize = 12.sp, maxLines = 1, textAlign = TextAlign.Center)
+                    }
                 }
             }
         }
@@ -171,11 +229,17 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
     val imageEntries = remember(file.path) { getAllImagesFromZip(file) }
     val context = LocalContext.current
     
-    var readMode by remember { mutableStateOf(ReadMode.VERTICAL_SEAMLESS) }
-    // 新增：是否全屏沉浸模式，默认全屏（隐藏状态栏）
-    var isFullScreen by remember { mutableStateOf(true) }
+    // 【核心新增】：引入 SharedPreferences 记忆本
+    val prefs = remember { context.getSharedPreferences("BlackSwallowPrefs", Context.MODE_PRIVATE) }
+    
+    // 从记忆本读取上次的选择
+    var readMode by remember { 
+        mutableStateOf(
+            if (prefs.getString("read_mode", "SEAMLESS") == "GAP") ReadMode.VERTICAL_GAP else ReadMode.VERTICAL_SEAMLESS
+        )
+    }
+    var isFullScreen by remember { mutableStateOf(prefs.getBoolean("full_screen", true)) }
 
-    // 动态响应全屏状态：切换时显示/隐藏系统状态栏
     DisposableEffect(isFullScreen) {
         val window = (context as ComponentActivity).window
         val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -192,7 +256,6 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            // 如果非全屏，给顶部加上安全区 padding（这就能产生你要的顶部黑色留白）
             .then(if (!isFullScreen) Modifier.statusBarsPadding() else Modifier)
             .pointerInput(Unit) { detectTapGestures(onTap = { isUiVisible = !isUiVisible }) }
     ) {
@@ -218,55 +281,38 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
         if (isUiVisible) {
             Column(
                 modifier = Modifier
-                    // 如果不是全屏，因为已经有 statusBarsPadding 了，所以这里不用加太大的 top padding
                     .padding(top = if (isFullScreen) 40.dp else 16.dp, start = 16.dp)
                     .align(Alignment.TopStart)
             ) {
-                // 返回按钮
                 Box(
-                    modifier = Modifier
-                        .border(1.dp, Color.White)
-                        .background(Color.Black.copy(alpha = 0.8f))
-                        .clickable { onBack() }
-                        .padding(8.dp)
+                    modifier = Modifier.border(1.dp, Color.White).background(Color.Black.copy(alpha = 0.8f)).clickable { onBack() }.padding(8.dp)
                 ) {
                     Text("< 返回", color = Color.White, fontFamily = FontFamily.Serif)
                 }
                 
                 Spacer(modifier = Modifier.height(12.dp))
                 
-                // 切换阅读模式（无缝 / 连页）
                 Box(
-                    modifier = Modifier
-                        .border(1.dp, Color.White)
-                        .background(Color.Black.copy(alpha = 0.8f))
-                        .clickable {
-                            readMode = if (readMode == ReadMode.VERTICAL_SEAMLESS) ReadMode.VERTICAL_GAP else ReadMode.VERTICAL_SEAMLESS
-                        }
-                        .padding(8.dp)
+                    modifier = Modifier.border(1.dp, Color.White).background(Color.Black.copy(alpha = 0.8f)).clickable {
+                        // 点击时切换模式，并写入记忆本
+                        val newMode = if (readMode == ReadMode.VERTICAL_SEAMLESS) ReadMode.VERTICAL_GAP else ReadMode.VERTICAL_SEAMLESS
+                        readMode = newMode
+                        prefs.edit().putString("read_mode", if (newMode == ReadMode.VERTICAL_GAP) "GAP" else "SEAMLESS").apply()
+                    }.padding(8.dp)
                 ) {
-                    Text(
-                        text = if (readMode == ReadMode.VERTICAL_SEAMLESS) "模式: 无缝" else "模式: 连页",
-                        color = Color.White,
-                        fontFamily = FontFamily.Serif
-                    )
+                    Text(if (readMode == ReadMode.VERTICAL_SEAMLESS) "模式: 无缝" else "模式: 连页", color = Color.White, fontFamily = FontFamily.Serif)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 切换全屏状态（全屏 / 显示状态栏）
                 Box(
-                    modifier = Modifier
-                        .border(1.dp, Color.White)
-                        .background(Color.Black.copy(alpha = 0.8f))
-                        .clickable { isFullScreen = !isFullScreen }
-                        .padding(8.dp)
+                    modifier = Modifier.border(1.dp, Color.White).background(Color.Black.copy(alpha = 0.8f)).clickable {
+                        // 点击时切换全屏，并写入记忆本
+                        isFullScreen = !isFullScreen
+                        prefs.edit().putBoolean("full_screen", isFullScreen).apply()
+                    }.padding(8.dp)
                 ) {
-                    Text(
-                        text = if (isFullScreen) "全屏: 沉浸" else "全屏: 状态栏",
-                        color = Color.White,
-                        fontFamily = FontFamily.Serif
-                    )
+                    Text(if (isFullScreen) "全屏: 沉浸" else "全屏: 状态栏", color = Color.White, fontFamily = FontFamily.Serif)
                 }
             }
         }
@@ -276,30 +322,21 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
 @Composable
 fun TiledImageItem(file: File, entryName: String) {
     var tiles by remember { mutableStateOf<List<androidx.compose.ui.graphics.ImageBitmap>>(emptyList()) }
-
     LaunchedEffect(entryName) {
         withContext(Dispatchers.IO) {
             val bytes = getImageStreamFromZip(file, entryName)
             if (bytes != null) {
                 val decodedTiles = splitLargeImage(bytes)
-                withContext(Dispatchers.Main) {
-                    tiles = decodedTiles
-                }
+                withContext(Dispatchers.Main) { tiles = decodedTiles }
             }
         }
     }
-
     if (tiles.isEmpty()) {
         Box(modifier = Modifier.fillMaxWidth().height(1000.dp).background(Color.Black))
     } else {
         Column(modifier = Modifier.fillMaxWidth()) {
             tiles.forEach { imageBitmap ->
-                Image(
-                    bitmap = imageBitmap,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxWidth(),
-                    contentScale = ContentScale.FillWidth
-                )
+                Image(bitmap = imageBitmap, contentDescription = null, modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
             }
         }
     }
