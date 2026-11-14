@@ -32,6 +32,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
@@ -44,6 +47,8 @@ import java.util.zip.ZipFile
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 启用全面屏（允许内容延伸到状态栏下面）
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent { BlackSwallowApp() }
     }
 }
@@ -129,8 +134,7 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
                                 model = ImageRequest.Builder(LocalContext.current)
                                     .data(coverData)
                                     .crossfade(true)
-                                    // 限制封面加载尺寸，防止内存撑爆
-                                    .size(300) 
+                                    .size(300)
                                     .build(),
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
@@ -148,15 +152,30 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
 
 @Composable
 fun ReaderScreen(file: File, onBack: () -> Unit) {
-    // 记录 UI 是否显示（点击屏幕可以隐藏/显示返回按钮）
     var isUiVisible by remember { mutableStateOf(true) }
     val imageEntries = remember(file.path) { getAllImagesFromZip(file) }
+    val context = LocalContext.current
+
+    // 动态获取你手机的真实屏幕宽度
+    val displayMetrics = context.resources.displayMetrics
+    val screenWidth = displayMetrics.widthPixels
+
+    // 沉浸式全屏逻辑：隐藏顶部状态栏和底部导航栏
+    DisposableEffect(Unit) {
+        val window = (context as ComponentActivity).window
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        
+        onDispose {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            // 点击屏幕任意位置，切换 UI 的显示和隐藏
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { isUiVisible = !isUiVisible })
             }
@@ -166,9 +185,9 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(getImageStreamFromZip(file, entryName))
-                        // 【核心优化】：开启降采样，按屏幕宽度缩放。长图再怎么大，GPU 也扛得住！
-                        .size(coil.size.Size.ORIGINAL) 
-                        .precision(Precision.INEXACT)
+                        // 只限制宽度，高度不限制，让图片完美自适应当前屏幕！
+                        .size(screenWidth, coil.size.Dimension.UNDEFINED)
+                        .precision(Precision.EXACT)
                         .scale(Scale.FILL)
                         .build(),
                     contentDescription = null,
@@ -178,11 +197,11 @@ fun ReaderScreen(file: File, onBack: () -> Unit) {
             }
         }
 
-        // 只有 isUiVisible 为 true 时，返回按钮才显示
         if (isUiVisible) {
             Box(
                 modifier = Modifier
-                    .padding(16.dp)
+                    // 因为隐藏了状态栏，按钮往下挪一点，避开刘海屏
+                    .padding(top = 40.dp, start = 16.dp)
                     .border(1.dp, Color.White)
                     .background(Color.Black.copy(alpha = 0.7f))
                     .clickable { onBack() }
@@ -208,7 +227,6 @@ fun getFirstImageFromZip(file: File): ByteArray? {
     return null
 }
 
-// 只获取文件名列表，不再把整个图片的 ByteArray 塞进内存！
 fun getAllImagesFromZip(file: File): List<String> {
     try {
         ZipFile(file).use { zip ->
@@ -222,7 +240,6 @@ fun getAllImagesFromZip(file: File): List<String> {
     return emptyList()
 }
 
-// 按需实时从 ZIP 读取流
 fun getImageStreamFromZip(file: File, entryName: String): ByteArray? {
     try {
         ZipFile(file).use { zip ->
