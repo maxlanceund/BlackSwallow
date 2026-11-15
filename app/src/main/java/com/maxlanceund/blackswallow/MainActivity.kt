@@ -152,7 +152,7 @@ fun BookshelfScreen(onComicClick: (File) -> Unit) {
     val allComics = remember(refreshTrigger) {
         val list = mutableListOf<ComicItem>()
         if (comicDir.exists() && comicDir.isDirectory) {
-            comicDir.walkTopDown().forEach { file ->
+            comicDir.walkTopDown().sortedWith { a, b -> naturalCompare(a.name, b.name) }.forEach { file ->
                 if (file.isFile && (file.extension.lowercase() == "zip" || file.extension.lowercase() == "cbz")) {
                     // 优先使用 JSON 里的逻辑分类，如果没有，默认"未分类"
                     val category = categoryMap[file.name] ?: "未分类"
